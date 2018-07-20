@@ -30,6 +30,7 @@ use IO::Socket;
 use Getopt::Long;
 use Net::SSLeay;
 use Date::Manip;
+use MIME::Base64;
 
 use vars qw($opt_H $opt_c $opt_w $opt_h $opt_i $opt_p $opt_t $opt_d $opt_v );
 
@@ -103,16 +104,18 @@ unless ($opt_H) {
 	print_usage();
 	exit $ERRORS{UNKNOWN};
 }
-my ($host, $port, $dhost, $dport, $url);
+my ($host, $port, $dhost, $dport, $url, $servername);
 if ($opt_p) {
 	($host, $port) = split(/:/, $opt_p);
 	($dhost, $dport) = split(/:/, $opt_H);
 	$url = $dhost;
-	
+	$servername = $dhost;
+
 } else {
 	($host, $port) = split(/:/, $opt_H);
 	$dhost = 'no';
 	$url = $host;
+	$servername = $host;
 }
 unless ($port) { $port = 443; }
 unless ($dport) { $dport = 443; }
@@ -142,6 +145,7 @@ my @issuers = split(/:/, $opt_i) if $opt_i;
 #
 ##############################################################################
 
+my $san;
 # get certificate details
 my ($notafter_days, $notafter, $notbefore_days, $notbefore, $subject, $issuer) = expiry_date($host, $port, $dhost, $dport);
 
@@ -149,8 +153,9 @@ my ($notafter_days, $notafter, $notbefore_days, $notbefore, $subject, $issuer) =
 print "DEBUG Verify $url with subject [ ",$subject," ]:\n" if $debug;
 my $subject_cn = $subject;
 $subject_cn=~ s/\/.*CN=([^\/]+).*/$1/;
-print "DEBUG Issuer (CN): ",$subject_cn,"\n" if $debug;
-die_crit("Subject CN '$subject_cn' does not match: $url") if not $subject_cn =~ /$url/;
+print "DEBUG Subject CN (CN): ",$subject_cn,"\n" if $debug;
+print "DEBUG SAN): ",$san,"\n" if $debug;
+die_crit("$url does not match Subject CN '$subject_cn' or SAN '$san'") if not ($subject_cn =~ /$url/ || $san =~ /$url/);
 
 # verify issuer
 my $issuer_cn = $issuer;
@@ -222,6 +227,7 @@ sub expiry_date ($$$$) {
 	my $mode = &Net::SSLeay::VERIFY_NONE;
 	Net::SSLeay::CTX_set_verify($ctx, $mode);
 	$ssl = Net::SSLeay::new($ctx);
+        Net::SSLeay::set_tlsext_host_name($ssl, $servername);
 	Net::SSLeay::set_fd($ssl, fileno($sock));
 	Net::SSLeay::connect($ssl);
 	# DO NOT DIE HERE IF CONNECTION FAILS - WE CAN GET SERVER CERTIFICATE EVEN WITHOUT SUCCESSFUL CONNECTION THEN
@@ -256,6 +262,16 @@ sub expiry_date ($$$$) {
 	my $issuer = Net::SSLeay::X509_NAME_oneline(Net::SSLeay::X509_get_issuer_name($crt));
 	print "DEBUG Issuer: ",$issuer,"\n" if $debug;
 
+        # get sans
+        my @altnames = Net::SSLeay::X509_get_subjectAltNames($crt);
+        if ( @altnames ) { while (@altnames) {
+            my $type = shift @altnames;
+            my $value = shift @altnames;
+            $value = join('.', unpack('C4', $value)) if ( $type == 7 ); # IP Address
+            $san.=$value.' ';
+        } }
+	print "DEBUG SANs ",$san,"\n" if $debug;
+	#
 	# cleanup
 	Net::SSLeay::free($ssl);
 	Net::SSLeay::CTX_free($ctx);
@@ -267,12 +283,14 @@ sub expiry_date ($$$$) {
 sub verbose () {
 	if ($verbose == 2) {
 		printf "Subject: %s\n",$subject if $subject;
+		printf "SANs %s\n",$san if $san;
 		printf "Issuer: %s\n",$issuer if $issuer;
 		printf "NotAfter: %s\n",$notafter if $notafter;
 		printf "NotBefore: %s\n",$notbefore if $notbefore;
 	}
 	if ($verbose == 1) {
 		printf "Subject CN: %s\n",$subject_cn if $subject_cn;
+		printf "SANs %s\n",$san if $san;
 		printf "Issuer CN: %s\n",$issuer_cn if $issuer_cn;
 		printf "NotAfter: %s\n",$notafter if $notafter;
 		printf "NotBefore: %s\n",$notbefore if $notbefore;
