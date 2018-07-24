@@ -38,6 +38,7 @@ my %ERRORS=('OK'=>0,'WARNING'=>1,'CRITICAL'=>2,'UNKNOWN'=>3);
 
 sub expiry_date ($$$$);
 sub get_cert_details ($);
+sub make_regex ($);
 sub verbose ();
 sub die_crit ($);
 sub die_warn ($);
@@ -155,7 +156,14 @@ my $subject_cn = $subject;
 $subject_cn=~ s/\/.*CN=([^\/]+).*/$1/;
 print "DEBUG Subject CN (CN): ",$subject_cn,"\n" if $debug;
 print "DEBUG SAN): ",$san,"\n" if $debug;
-die_crit("$url does not match Subject CN '$subject_cn' or SAN '$san'") if not ($subject_cn =~ /$url/ || $san =~ /$url/);
+die_crit("$url does not match Subject CN '$subject_cn' or SAN '$san'") if not
+	grep {
+		$url =~ /$_/;
+	} map {
+		make_regex($_);
+	} map {
+		split(/\s+/, $_);
+	} ($subject_cn, $san);
 
 # verify issuer
 my $issuer_cn = $issuer;
@@ -278,6 +286,13 @@ sub expiry_date ($$$$) {
 	$sock->close();
 	  
 	return ("$notafter_days", "$notafter", "$notbefore_days", "$notbefore", "$subject", "$issuer");
+}
+
+sub make_regex ($) {
+	my $glob = shift;
+	$glob =~ s/\./\\./g;
+	$glob =~ s/^\*/.*/g;
+	return '^'.$glob.'$';
 }
 
 sub verbose () {
