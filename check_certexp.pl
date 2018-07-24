@@ -146,7 +146,7 @@ my @issuers = split(/:/, $opt_i) if $opt_i;
 #
 ##############################################################################
 
-my $san;
+my $san = "";
 # get certificate details
 my ($notafter_days, $notafter, $notbefore_days, $notbefore, $subject, $issuer) = expiry_date($host, $port, $dhost, $dport);
 
